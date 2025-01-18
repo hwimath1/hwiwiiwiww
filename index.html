@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>순서쌍과 좌표평면</title>
+  <!-- MathJax for LaTeX rendering -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    defer
+  ></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f3f3f3;
+    }
+    #main-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      margin-top: 30px;
+      margin-bottom: 30px;
+    }
+    h1, h2, h3 {
+      text-align: center;
+      margin: 0.5em;
+    }
+    .center {
+      text-align: center;
+    }
+    .hidden {
+      display: none;
+    }
+    #name-input {
+      display: block;
+      margin: 1em auto;
+      padding: 0.5em;
+      font-size: 1em;
+      width: 200px;
+      text-align: center;
+    }
+    #difficulty-select {
+      display: block;
+      margin: 0.5em auto;
+      padding: 0.5em;
+      font-size: 1em;
+      width: 200px;
+    }
+    #start-button, #submit-btn, #score-send-btn {
+      display: block;
+      margin: 1em auto;
+      padding: 10px 20px;
+      font-size: 1em;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+    }
+    #start-button:hover, #submit-btn:hover, #score-send-btn:hover {
+      background-color: #45a049;
+    }
+    #energy-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #ccc;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 5px;
+      position: relative;
+    }
+    #energy-bar-inner {
+      height: 100%;
+      background-color: #76b900;
+      width: 100%;
+      transition: width 0.5s linear;
+    }
+    #question-container {
+      margin-top: 20px;
+    }
+    #answers-container ul {
+      list-style: none;
+      padding-left: 0;
+    }
+    #answers-container li {
+      margin: 0.5em 0;
+      padding: 0.5em;
+      background: #f9f9f9;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #answers-container li:hover {
+      background: #ddd;
+    }
+    #timer, #lives, #score-display, #total-time {
+      font-weight: bold;
+      margin: 0.5em 0;
+      text-align: center;
+    }
+    #response {
+      white-space: pre-wrap;
+      background: #eee;
+      padding: 1em;
+      margin-top: 1em;
+      border-radius: 5px;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+<div id="main-container">
+  <h1>순서쌍과 좌표평면</h1>
+  
+  <!-- 첫 화면: 이름과 난이도 선택 -->
+  <div id="intro-screen">
+    <input type="text" id="name-input" placeholder="이름을 입력하세요" />
+    <select id="difficulty-select">
+      <option value="top">최상 (20초)</option>
+      <option value="high">상 (30초)</option>
+      <option value="mid">중 (40초)</option>
+      <option value="low">하 (시간 제한 없음)</option>
+    </select>
+    <button id="start-button">게임 시작</button>
+  </div>
+  
+  <!-- 게임 진행 화면 -->
+  <div id="game-screen" class="hidden">
+    <div id="timer" class="hidden"></div>
+    <div id="energy-bar" class="hidden">
+      <div id="energy-bar-inner"></div>
+    </div>
+    <div id="total-time"></div>
+    <div id="lives"></div>
+    <div id="score-display"></div>
+    
+    <div id="question-container"></div>
+    <div id="answers-container"></div>
+    <button id="submit-btn">정답 제출</button>
+  </div>
+
+  <!-- 게임 종료 화면 -->
+  <div id="end-screen" class="hidden center">
+    <h2 id="end-message"></h2>
+    <h3 id="final-score"></h3>
+    <button id="score-send-btn">점수 전송</button>
+    <div id="response"></div>
+  </div>
+</div>
+
+<script>
+/* 
+  MathJax will be used to render LaTeX after each question and its choices.
+  We'll call MathJax.typeset() whenever the content is updated.
+*/
+
+// ----------------------------------------------------
+// (31) 점수 전송 함수
+// ----------------------------------------------------
+function saveData(game, name, score, elapsedTime) {
+  const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+  const requestData = {
+    game,
+    name,
+    score: parseInt(score, 10),
+    elapsedTime: parseInt(elapsedTime, 10)
+  };
+
+  fetch(FUNCTION_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestData)
+  })
+  .then(response => {
+    return response.json().then(responseData => {
+      if (response.ok) {
+        document.getElementById('response').innerText = 
+          `성공: ${JSON.stringify(responseData, null, 2)}`;
+      } else {
+        document.getElementById('response').innerText = 
+          `오류: ${JSON.stringify(responseData, null, 2)}`;
+      }
+    });
+  })
+  .catch(error => {
+    console.error('요청 실패:', error);
+    document.getElementById('response').innerText = 
+      `네트워크 오류: ${error.message}`;
+  });
+}
+
+// ----------------------------------------------------
+// 난이도별 시작 시간 & 점수
+// ----------------------------------------------------
+const difficultySettings = {
+  top:  { time: 20,  score: 20 },  // 최상
+  high: { time: 30,  score: 15 },  // 상
+  mid:  { time: 40,  score: 13 },  // 중
+  low:  { time: null, score: 10 }  // 하 (시간제한 없음)
+};
+
+// ----------------------------------------------------
+// 문제 리스트 (총 41문제) - 순서는 무작위로 섞어서 출제
+// 보기 순서/정답 인덱스는 원문 그대로 유지
+// "문제 번호"는 표시하지 않고, 질문 내용만 넣음
+// "보기"는 4개, numbering 대신 그대로 문자열에 포함
+// ----------------------------------------------------
+// 주의: 각 문제는 {question, answers: [...], correct: <인덱스>, done: false} 형태로
+// 원문에서 보기에 "1) ... 2)..." 형태가 있지만, "각 문항 번호는 생략" 지시에 따라
+// 여기서는 단순 줄바꿈으로 표기하되, 텍스트 내용은 바꾸지 않습니다.
+//
+const quizData = [
+
+  // ---------------------
+  // 첫 번째 세트 (3~8번)
+  // ---------------------
+  {
+    question: `
+두 점 \\(A(0), B(6)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+(조건: \\(A, B\\)가 수직선上的 두 점)
+
+보기:
+1) \\(M(2)\\)
+2) \\(M(3)\\)
+3) \\(M(-3)\\)
+4) \\(M(6)\\)
+`,
+    answers: [
+      "\\(M(2)\\)",
+      "\\(M(3)\\)",
+      "\\(M(-3)\\)",
+      "\\(M(6)\\)"
+    ],
+    correct: 1  // 2) M(3)
+  },
+  {
+    question: `
+두 점 \\(A(-4), B(0)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+
+보기:
+1) \\(M(-1)\\)
+2) \\(M(-3)\\)
+3) \\(M(-2)\\)
+4) \\(M(2)\\)
+`,
+    answers: [
+      "\\(M(-1)\\)",
+      "\\(M(-3)\\)",
+      "\\(M(-2)\\)",
+      "\\(M(2)\\)"
+    ],
+    correct: 2  // 3) M(-2)
+  },
+  {
+    question: `
+두 점 \\(A(-4), B(4)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+
+보기:
+1) \\(M(0)\\)
+2) \\(M(-2)\\)
+3) \\(M(4)\\)
+4) \\(M(2)\\)
+`,
+    answers: [
+      "\\(M(0)\\)",
+      "\\(M(-2)\\)",
+      "\\(M(4)\\)",
+      "\\(M(2)\\)"
+    ],
+    correct: 0  // 1) M(0)
+  },
+  {
+    question: `
+두 점 \\(A(1), B(9)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+
+보기:
+1) \\(M(5)\\)
+2) \\(M(4)\\)
+3) \\(M(6)\\)
+4) \\(M(0)\\)
+`,
+    answers: [
+      "\\(M(5)\\)",
+      "\\(M(4)\\)",
+      "\\(M(6)\\)",
+      "\\(M(0)\\)"
+    ],
+    correct: 0  // 1) M(5)
+  },
+  {
+    question: `
+두 점 \\(A(-10), B(-2)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+
+보기:
+1) \\(M(-8)\\)
+2) \\(M(-5)\\)
+3) \\(M(-6)\\)
+4) \\(M(0)\\)
+`,
+    answers: [
+      "\\(M(-8)\\)",
+      "\\(M(-5)\\)",
+      "\\(M(-6)\\)",
+      "\\(M(0)\\)"
+    ],
+    correct: 2  // 3) M(-6)
+  },
+  {
+    question: `
+두 점 \\(A(-3), B(7)\\)로부터 같은 거리에 있는 점 \\(M\\)의 좌표를 구하여라.
+
+보기:
+1) \\(M(0)\\)
+2) \\(M(2)\\)
+3) \\(M(4)\\)
+4) \\(M(-2)\\)
+`,
+    answers: [
+      "\\(M(0)\\)",
+      "\\(M(2)\\)",
+      "\\(M(4)\\)",
+      "\\(M(-2)\\)"
+    ],
+    correct: 1  // 2) M(2)
+  },
+
+  // ---------------------
+  // 두 번째 세트 (9~13번)
+  // ---------------------
+  {
+    question: `
+두 순서쌍 \\((-a+2, 5)\\)와 \\((3, b-1)\\)이 서로 같을 때, \\(b - a\\)의 값은?
+
+보기:
+1) 3
+2) 5
+3) 7
+4) 10
+`,
+    answers: ["3", "5", "7", "10"],
+    correct: 2 // 7
+  },
+  {
+    question: `
+두 순서쌍 \\((2a-7, -b+3)\\)와 \\((a-3, -3b+1)\\)이 서로 같을 때, \\(ab\\)의 값은?
+
+보기:
+1) 2
+2) -4
+3) 0
+4) 4
+`,
+    answers: ["2", "-4", "0", "4"],
+    correct: 1 // -4
+  },
+  {
+    question: `
+두 순서쌍 \\((3a-5, 2)\\)와 \\((1, 2b+4)\\)가 서로 같을 때, \\(a + b\\)의 값은?
+
+보기:
+1) 1
+2) 2
+3) 0
+4) -1
+`,
+    answers: ["1", "2", "0", "-1"],
+    correct: 0 // 1
+  },
+  {
+    question: `
+두 순서쌍 \\((3a-1, b+2)\\)와 \\((2a+3, -3b-2)\\)가 서로 같을 때, \\(a + b\\)의 값은?
+
+보기:
+1) 4
+2) 5
+3) 3
+4) 0
+`,
+    answers: ["4", "5", "3", "0"],
+    correct: 2 // 3
+  },
+  {
+    question: `
+두 순서쌍 \\((2a+4, b+3)\\)와 \\((2-a, 3b+5)\\)가 서로 같을 때, \\(a \\div b\\)의 값은?
+
+보기:
+1) 1
+2) -1
+3) \\(\\dfrac{2}{3}\\)
+4) 2
+`,
+    answers: ["1", "-1", "\\(\\dfrac{2}{3}\\)", "2"],
+    correct: 2 // 2/3
+  },
+
+  // ---------------------
+  // 세 번째 세트 (17~23)
+  // ---------------------
+  {
+    question: `
+점 \\((a, b+1)\\)가 \\(x\\)축 위의 점이고, 점 \\((2a+3, b)\\)가 \\(y\\)축 위의 점일 때, \\(a + b\\)의 값은?
+
+보기:
+1) -5
+2) -\\(\\dfrac{5}{2}\\)
+3) 0
+4) 5
+`,
+    answers: ["-5","-\\(\\dfrac{5}{2}\\)","0","5"],
+    correct: 1 // -5/2
+  },
+  {
+    question: `
+점 \\((3a-2, a-5)\\)는 \\(x\\)축 위의 점이고, 점 \\((2b-8, 3b+1)\\)는 \\(y\\)축 위의 점일 때, \\(a - b\\)의 값은?
+
+보기:
+1) -1
+2) 1
+3) 2
+4) 3
+`,
+    answers: ["-1","1","2","3"],
+    correct: 1 // 1
+  },
+  {
+    question: `
+점 \\((3a-1, 1-2a)\\)는 \\(x\\)축 위의 점이고, 점 \\((4-2b, b+1)\\)는 \\(y\\)축 위의 점일 때, \\(2ab\\)의 값은?
+
+보기:
+1) 1
+2) 2
+3) -2
+4) 4
+`,
+    answers: ["1","2","-2","4"],
+    correct: 1 // 2
+  },
+  {
+    question: `
+점 \\((2a-1, b+2)\\)는 \\(x\\)축 위의 점이고, 점 \\((2a-4, b)\\)는 \\(y\\)축 위의 점일 때, \\(a + b\\)의 값은?
+
+보기:
+1) -2
+2) 0
+3) 2
+4) 1
+`,
+    answers: ["-2","0","2","1"],
+    correct: 1 // 0
+  },
+  {
+    question: `
+점 \\(\\bigl(\\dfrac{1}{2}a+2,\\, a-4\\bigr)\\)는 \\(x\\)축 위의 점이고, 점 \\((2b-8, 3b+1)\\)는 \\(y\\)축 위의 점일 때, \\(\\dfrac{1}{2}a + b\\)의 값은?
+
+보기:
+1) 2
+2) 4
+3) 6
+4) 8
+`,
+    answers: ["2","4","6","8"],
+    correct: 2 // 6
+  },
+  {
+    question: `
+점 \\((-2a+5, a+5)\\)는 \\(x\\)축 위의 점이고, 점 \\((-b-2, 3b-2)\\)는 \\(y\\)축 위의 점일 때, \\(a + b\\)의 값은?
+
+보기:
+1) -6
+2) -10
+3) -7
+4) 7
+`,
+    answers: ["-6","-10","-7","7"],
+    correct: 2 // -7
+  },
+  {
+    question: `
+점 \\((3a+1, 2-5a)\\)는 \\(x\\)축 위의 점이고, 점 \\((5a-b+3, 2b-7)\\)는 \\(y\\)축 위의 점일 때, \\(ab\\)의 값은?
+
+보기:
+1) 2
+2) -1
+3) 1
+4) 3
+`,
+    answers: ["2","-1","1","3"],
+    correct: 0 // 2
+  },
+
+  // ---------------------
+  // 네 번째 세트 (25~33)
+  // ---------------------
+  {
+    question: `
+\\(x\\)좌표가 -4, \\(y\\)좌표가 3인 점을 기호로 나타내어라.
+
+보기:
+1) (-4, 3)
+2) (4, -3)
+3) (3, -4)
+4) (-4, -3)
+`,
+    answers: ["(-4, 3)","(4, -3)","(3, -4)","(-4, -3)"],
+    correct: 0 
+  },
+  {
+    question: `
+\\(x\\)좌표가 3, \\(y\\)좌표가 7인 점을 기호로 나타내어라.
+
+보기:
+1) (7, 3)
+2) (3, 7)
+3) (3, -7)
+4) (-3, 7)
+`,
+    answers: ["(7, 3)","(3, 7)","(3, -7)","(-3, 7)"],
+    correct: 1
+  },
+  {
+    question: `
+\\(x\\)좌표가 -2, \\(y\\)좌표가 -9인 점을 기호로 나타내어라.
+
+보기:
+1) (2, 9)
+2) (-2, 9)
+3) (-2, -9)
+4) (9, -2)
+`,
+    answers: ["(2, 9)","(-2, 9)","(-2, -9)","(9, -2)"],
+    correct: 2
+  },
+  {
+    question: `
+\\(x\\)좌표가 2, \\(y\\)좌표가 1인 점을 기호로 나타내어라.
+
+보기:
+1) (2, 1)
+2) (1, 2)
+3) (-2, 1)
+4) (2, -1)
+`,
+    answers: ["(2, 1)","(1, 2)","(-2, 1)","(2, -1)"],
+    correct: 0
+  },
+  {
+    question: `
+\\(x\\)좌표가 -6, \\(y\\)좌표가 \\(2^2\\)인 점을 기호로 나타내어라.
+
+보기:
+1) (-6, -4)
+2) (-6, 2)
+3) (6, 4)
+4) (-6, 4)
+`,
+    answers: ["(-6, -4)","(-6, 2)","(6, 4)","(-6, 4)"],
+    correct: 3
+  },
+  {
+    question: `
+\\(x\\)좌표가 -8, \\(y\\)좌표가 2인 점을 기호로 나타내어라.
+
+보기:
+1) (8, 2)
+2) (-8, 2)
+3) (-8, -2)
+4) (2, -8)
+`,
+    answers: ["(8, 2)","(-8, 2)","(-8, -2)","(2, -8)"],
+    correct: 1
+  },
+  {
+    question: `
+\\(x\\)축 위에 있고 \\(x\\)좌표가 4인 점을 기호로 나타내어라.
+
+보기:
+1) (4, 0)
+2) (0, 4)
+3) (-4, 0)
+4) (4, 4)
+`,
+    answers: ["(4, 0)","(0, 4)","(-4, 0)","(4, 4)"],
+    correct: 0
+  },
+  {
+    question: `
+\\(x\\)축 위에 있고 \\(x\\)좌표가 -2인 점을 기호로 나타내어라.
+
+보기:
+1) (2, 0)
+2) (0, 2)
+3) (-2, 0)
+4) (-2, 2)
+`,
+    answers: ["(2, 0)","(0, 2)","(-2, 0)","(-2, 2)"],
+    correct: 2
+  },
+  {
+    question: `
+\\(y\\)축 위에 있고 \\(y\\)좌표가 -5인 점을 기호로 나타내어라.
+
+보기:
+1) (-5, 0)
+2) (5, 0)
+3) (0, -5)
+4) (0, 5)
+`,
+    answers: ["(-5, 0)","(5, 0)","(0, -5)","(0, 5)"],
+    correct: 2
+  },
+
+  // ---------------------
+  // 다섯 번째 세트 (40~44)
+  // ---------------------
+  {
+    question: `
+다음 좌표의 네 점 \\(A(-1,4), B(-1,-1), C(3,-1), D(3,2)\\)로 이루어진 사각형 \\(ABCD\\)의 넓이를 구하여라.
+
+보기:
+1) 12
+2) 14
+3) 16
+4) 18
+`,
+    answers: ["12","14","16","18"],
+    correct: 2
+  },
+  {
+    question: `
+다음 좌표의 네 점 \\(A(-2,4), B(-2,-3), C(5,-3), D(5,4)\\)로 이루어진 사각형 \\(ABCD\\)의 넓이를 구하여라.
+
+보기:
+1) 42
+2) 49
+3) 40
+4) 54
+`,
+    answers: ["42","49","40","54"],
+    correct: 1
+  },
+  {
+    question: `
+다음 좌표의 네 점 \\(A(-2,-1), B(2,-1), C(3,4), D(-1,4)\\)로 이루어진 사각형 \\(ABCD\\)의 넓이를 구하여라.
+
+보기:
+1) 15
+2) 18
+3) 20
+4) 24
+`,
+    answers: ["15","18","20","24"],
+    correct: 2
+  },
+  {
+    question: `
+다음 좌표의 네 점 \\(A(-2,3), B(-2,-2), C(4,-2), D(4,3)\\)로 이루어진 사각형 \\(ABCD\\)의 넓이를 구하여라.
+
+보기:
+1) 30
+2) 25
+3) 35
+4) 20
+`,
+    answers: ["30","25","35","20"],
+    correct: 0
+  },
+  {
+    question: `
+다음 좌표의 네 점 \\(A(3,1), B(-1,-2), C(-1,0), D(3,-4)\\)로 이루어진 사각형 \\(ABCD\\)의 넓이를 구하여라.
+
+보기:
+1) 12
+2) 14
+3) 16
+4) 10
+`,
+    answers: ["12","14","16","10"],
+    correct: 1
+  },
+
+  // ---------------------
+  // 여섯 번째 세트 (47~55)
+  // ---------------------
+  {
+    question: `
+다음 좌표의 세 점 \\(A(0,0), B(-4,0), C(3,8)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 12
+2) 14
+3) 16
+4) 18
+`,
+    answers: ["12","14","16","18"],
+    correct: 2
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(1,1), B(1,8), C(7,1)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 14
+2) 18
+3) 21
+4) 24
+`,
+    answers: ["14","18","21","24"],
+    correct: 2
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(0,-3), B(4,0), C(4,-6)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 10
+2) 12
+3) 15
+4) 18
+`,
+    answers: ["10","12","15","18"],
+    correct: 1
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(-3,2), B(1,1), C(3,4)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 4
+2) 7
+3) 9
+4) 10
+`,
+    answers: ["4","7","9","10"],
+    correct: 1
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(3,2), B(-5,2), C(2,-2)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 10
+2) 12
+3) 14
+4) 16
+`,
+    answers: ["10","12","14","16"],
+    correct: 3
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(3,2), B(-5,2), C(0,-4)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 20
+2) 24
+3) 26
+4) 28
+`,
+    answers: ["20","24","26","28"],
+    correct: 1
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(4,2), B(-4,3), C(2,-1)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 10
+2) 13
+3) 15
+4) 18
+`,
+    answers: ["10","13","15","18"],
+    correct: 1
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(3,2), B(-1,2), C(1,-4)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 8
+2) 10
+3) 12
+4) 14
+`,
+    answers: ["8","10","12","14"],
+    correct: 2
+  },
+  {
+    question: `
+다음 좌표의 세 점 \\(A(1,1), B(-3,1), C(-3,4)\\)으로 이루어진 삼각형 \\(ABC\\)의 넓이를 구하여라.
+
+보기:
+1) 4
+2) 6
+3) 8
+4) 9
+`,
+    answers: ["4","6","8","9"],
+    correct: 1
+  }
+];
+
+// ----------------------------------------------------
+// Shuffle function for entire question set
+// and for answer choices if needed
+// But we keep the original answer order -> no shuffle of answers
+// Because "보기의 순서 바꾸지 말라" 지시 있음
+// We'll only shuffle the question array
+// ----------------------------------------------------
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+let nameValue = "";
+let difficulty = "low";
+let baseTime = null;  // time limit for each question if not 'low'
+let baseScore = 10;   // base score depending on difficulty
+
+let questionIndex = 0;
+let score = 0;
+let lives = 3;        // 총 3회 기회
+let totalTime = 0;    // 전체 경과 시간(초)
+let timeRemaining = null; // 현재 문제에 남은 시간
+let timerInterval = null;
+let totalTimeInterval = null;
+let gameQuestions = []; // shuffled question array
+
+// ----------------------------------------------------
+// 페이지 요소 참조
+// ----------------------------------------------------
+const introScreen = document.getElementById("intro-screen");
+const gameScreen = document.getElementById("game-screen");
+const endScreen  = document.getElementById("end-screen");
+const nameInput  = document.getElementById("name-input");
+const difficultySelect = document.getElementById("difficulty-select");
+const startButton = document.getElementById("start-button");
+const questionContainer = document.getElementById("question-container");
+const answersContainer  = document.getElementById("answers-container");
+const submitBtn = document.getElementById("submit-btn");
+const timerElem  = document.getElementById("timer");
+const energyBar  = document.getElementById("energy-bar");
+const energyBarInner = document.getElementById("energy-bar-inner");
+const totalTimeElem = document.getElementById("total-time");
+const livesElem  = document.getElementById("lives");
+const scoreDisplay = document.getElementById("score-display");
+const endMessage = document.getElementById("end-message");
+const finalScore = document.getElementById("final-score");
+const scoreSendBtn = document.getElementById("score-send-btn");
+const responseBox = document.getElementById("response");
+
+// ----------------------------------------------------
+// 난이도 선택 및 시작
+// ----------------------------------------------------
+startButton.addEventListener("click", () => {
+  nameValue = nameInput.value.trim();
+  if (!nameValue) {
+    alert("이름을 입력하세요!");
+    return;
+  }
+  difficulty = difficultySelect.value;
+  baseTime = difficultySettings[difficulty].time;
+  baseScore = difficultySettings[difficulty].score;
+
+  introScreen.classList.add("hidden");
+  gameScreen.classList.remove("hidden");
+
+  // 질문 배열 셔플
+  gameQuestions = [...quizData];
+  shuffleArray(gameQuestions);
+
+  // 전체 타이머 시작
+  totalTime = 0;
+  totalTimeInterval = setInterval(() => {
+    totalTime++;
+    totalTimeElem.textContent = `전체 게임 시간: ${totalTime}초`;
+  }, 1000);
+
+  // 첫 문제 표시
+  questionIndex = 0;
+  score = 0;
+  lives = 3;
+  updateStatusDisplay();
+  loadQuestion();
+});
+
+// ----------------------------------------------------
+// 현재 문제 로드
+// ----------------------------------------------------
+function loadQuestion() {
+  if (questionIndex >= gameQuestions.length) {
+    // 모든 문제를 다 풀면 게임 종료
+    endGame(true);
+    return;
+  }
+  const currentQ = gameQuestions[questionIndex];
+  questionContainer.innerHTML = currentQ.question;
+  
+  // 보기는 numbering을 그대로 두지 말라는 지시이므로,
+  // 여기서는 각 줄을 <li>에 그대로 출력
+  let html = "<ul>";
+  currentQ.answers.forEach((ans, idx) => {
+    html += `<li data-idx="${idx}">${ans}</li>`;
+  });
+  html += "</ul>";
+  answersContainer.innerHTML = html;
+
+  // 시간 제한 설정
+  if (baseTime !== null) {
+    timerElem.classList.remove("hidden");
+    energyBar.classList.remove("hidden");
+    timeRemaining = baseTime;
+    energyBarInner.style.width = "100%";
+    timerElem.textContent = ``; // 남은 시간 숫자로 표시하지 않음
+    
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      timeRemaining--;
+      // 에너지바 시각적 감소
+      const percentage = (timeRemaining / baseTime) * 100;
+      energyBarInner.style.width = percentage + "%";
+
+      if (timeRemaining <= 0) {
+        // 시간 초과 -> 기회 1 깎이고, 다음 문제로
+        loseLifeTimeOver();
+      }
+    }, 1000);
+
+  } else {
+    // 하(시간 제한 없음)
+    timerElem.classList.add("hidden");
+    energyBar.classList.add("hidden");
+  }
+
+  // 수식 렌더링
+  MathJax.typeset();
+}
+
+// ----------------------------------------------------
+// "정답 제출" 버튼
+// ----------------------------------------------------
+let selectedAnswer = null;
+answersContainer.addEventListener("click", (e) => {
+  if (e.target && e.target.matches("li")) {
+    // 선택 표시
+    const lis = answersContainer.querySelectorAll("li");
+    lis.forEach(li => {
+      li.style.background = "#f9f9f9";
+    });
+    e.target.style.background = "#cfc";
+    selectedAnswer = parseInt(e.target.getAttribute("data-idx"));
+  }
+});
+
+submitBtn.addEventListener("click", () => {
+  if (selectedAnswer === null) {
+    alert("답안을 선택하세요!");
+    return;
+  }
+  checkAnswer();
+});
+
+// ----------------------------------------------------
+// 정답 판별
+// ----------------------------------------------------
+function checkAnswer() {
+  const currentQ = gameQuestions[questionIndex];
+  // 맞았는지?
+  if (selectedAnswer === currentQ.correct) {
+    // 정답
+    score += baseScore;
+    questionIndex++;
+    selectedAnswer = null;
+    loadNextQuestion();
+  } else {
+    // 오답
+    alert(`틀렸습니다!\n정답: ${currentQ.answers[currentQ.correct]}`);
+    loseLifeWrong();
+  }
+}
+
+function loseLifeWrong() {
+  lives--;
+  updateStatusDisplay();
+  if (lives <= 0) {
+    endGame(false);
+    return;
+  }
+  // 오답이어도 다음 문제
+  questionIndex++;
+  selectedAnswer = null;
+  loadNextQuestion();
+}
+
+function loseLifeTimeOver() {
+  clearInterval(timerInterval);
+  lives--;
+  updateStatusDisplay();
+  if (lives <= 0) {
+    endGame(false);
+    return;
+  }
+  // 시간 초과여도 다음 문제
+  questionIndex++;
+  selectedAnswer = null;
+  loadNextQuestion();
+}
+
+// ----------------------------------------------------
+// 다음 문제로 이동
+// ----------------------------------------------------
+function loadNextQuestion() {
+  clearInterval(timerInterval);
+  updateStatusDisplay();
+  loadQuestion();
+}
+
+// ----------------------------------------------------
+// 상태 표시 (기회, 점수 등)
+// ----------------------------------------------------
+function updateStatusDisplay() {
+  livesElem.textContent = `남은 기회: ${lives}`;
+  scoreDisplay.textContent = `점수: ${score}`;
+}
+
+// ----------------------------------------------------
+// 게임 종료
+// ----------------------------------------------------
+function endGame(isClear) {
+  clearInterval(timerInterval);
+  clearInterval(totalTimeInterval);
+  gameScreen.classList.add("hidden");
+  endScreen.classList.remove("hidden");
+
+  if (isClear) {
+    endMessage.textContent = "축하합니다! 모든 문제를 풀었습니다.";
+  } else {
+    endMessage.textContent = "게임 오버! 더 이상 진행할 수 없습니다.";
+  }
+  finalScore.textContent = `최종 점수: ${score}`;
+}
+
+// ----------------------------------------------------
+// 점수 전송
+// ----------------------------------------------------
+scoreSendBtn.addEventListener("click", () => {
+  saveData("순서쌍과 좌표평면", nameValue, score, totalTime);
+});
+</script>
+</body>
+</html>
